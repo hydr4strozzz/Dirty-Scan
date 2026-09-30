@@ -2585,7 +2585,7 @@ def run_auto_scan(url, team="Team"):
 
 def show_banner():
     os.system("clear" if os.name == "posix" else "cls")
-    print(f"""{BLUE}
+    print(f"""{GREEN}
 █▀▄ █ █▀▄ ▀█▀ █ █   █▀▀ █▀▀ █▀█ █▀█
 █ █ █ █▀▄  █  ▀█▀   ▀▀█ █   █▀█ █ █
 ▀▀  ▀ ▀ ▀  ▀   ▀    ▄▄█ ▀▀▀ ▀ ▀ █ █
