@@ -2586,12 +2586,10 @@ def run_auto_scan(url, team="Team"):
 def show_banner():
     os.system("clear" if os.name == "posix" else "cls")
     print(f"""{BLUE}
-  ____  _ _                 ____
- |  _ \\(_) |_ _ __ _   _   / ___|  ___ __ _ _ __
- | | | | | __| '__| | | |  \\___ \\ / __/ _` | '_ \\
- | |_| | | |_| |  | |_| |   ___) | (_| (_| | | | |
- |____/|_|\\__|_|   \\__, |  |____/ \\___\\__,_|_| |_|
-                   |___/
+█▀▄ █ █▀▄ ▀█▀ █ █   █▀▀ █▀▀ █▀█ █▀█
+█ █ █ █▀▄  █  ▀█▀   ▀▀█ █   █▀█ █ █
+▀▀  ▀ ▀ ▀  ▀   ▀    ▄▄█ ▀▀▀ ▀ ▀ █ █
+
 {NC}{YELLOW}  Author : {AUTHOR}{NC}
 {YELLOW}  Version: {VERSION} — Full Pentest + Defacement{NC}
 {YELLOW}  Platform: {platform.system()} {platform.release()}{'  (Termux)' if IS_TERMUX else ''}{NC}
